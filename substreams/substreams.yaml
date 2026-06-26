@@ -2,7 +2,8 @@ specVersion: v0.1.0
 package:
   name: substreams_solana_wallet_tracker
   version: v0.1.0
-  doc: |
+  url: https://github.com/streamingfast/solana-wallet-tracker-example
+  description: |
     Reports the Solana transactions that touch a wallet present in a Hosted
     Store. The store is filled externally (e.g. by the companion sink's
     `store add` command) with the wallets to watch.
@@ -15,6 +16,14 @@ protobuf:
     - com/acme/wallet/v1/wallet.proto
   importPaths:
     - ../proto
+  # Don't re-generate bundled protos: `google.*` ships with prost and the Hosted
+  # Store types (`sf.substreams.foundational_store.*`) come from the `substreams`
+  # crate. Do NOT exclude `sf/substreams` wholesale — this package's own proto
+  # lives under `sf/substreams/example/...` and excluding the parent would drop
+  # it from generation.
+  excludePaths:
+    - google
+    - sf/substreams/foundational-store
 
 binaries:
   default:

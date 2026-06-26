@@ -5,9 +5,10 @@ package sf.substreams.example.wallettracker.v1;
 option go_package = "github.com/streamingfast/solana-wallet-tracker-example/pb/sf/substreams/example/wallettracker/v1;pbtracked";
 
 // The Hosted Store value type is com.acme.wallet.v1.WalletInfo (the customer's
-// type, defined in com/acme/wallet/v1/wallet.proto). The store key is the UTF-8
-// bytes of the base58-encoded wallet address — both the Substreams (Rust) reader
-// and the sink `store add` command use that convention so keys line up.
+// type, defined in com/acme/wallet/v1/wallet.proto). The store key is the raw
+// 32-byte Solana pubkey (NOT the base58 string): the sink `store add` command
+// base58-decodes the address you pass before writing, and the Substreams (Rust)
+// reader keys on the same raw bytes, so entries line up.
 
 // TrackedTransactions is the per-block output of the `map_tracked_transactions`
 // module: the subset of transactions in a block that touch at least one wallet

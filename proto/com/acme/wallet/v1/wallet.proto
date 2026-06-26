@@ -12,9 +12,10 @@ option go_package = "github.com/streamingfast/solana-wallet-tracker-example/pb/c
 //
 //   type.googleapis.com/com.acme.wallet.v1.WalletInfo
 //
-// KEY ENCODING: the store key (separate from this value) is the UTF-8 bytes of
-// the base58-encoded wallet address. Both the Substreams (Rust) reader and the
-// sink `store add` command use this same convention so keys line up.
+// KEY ENCODING: the store key (separate from this value) is the raw 32-byte
+// Solana pubkey, not its base58 string. The sink `store add` command base58-
+// decodes the address you pass before writing, and the Substreams (Rust) reader
+// keys on the same raw bytes, so keys line up.
 message WalletInfo {
   // Human-friendly label for the wallet (e.g. "treasury", "vip-customer-42").
   string label = 1;
