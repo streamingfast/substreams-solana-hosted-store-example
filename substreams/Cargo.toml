@@ -1,0 +1,28 @@
+[package]
+name = "substreams_solana_wallet_tracker"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# 0.7.x is required for `substreams::store::FoundationalStore` (the Hosted Store
+# input). Older 0.6.x does NOT expose it.
+substreams = "0.7"
+
+# Solana block model + helpers (walk_instructions, b58!, etc.). 0.15 is the first
+# release compatible with substreams 0.7 (0.14.x pinned substreams ^0.6).
+substreams-solana = "0.15"
+
+bs58 = "0.4"
+prost = "0.13"
+prost-types = "0.13"
+
+[build-dependencies]
+prost-build = "0.13"
+
+[profile.release]
+lto = true
+opt-level = "s"
+strip = "debuginfo"

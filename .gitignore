@@ -1,0 +1,14 @@
+# Rust / Substreams
+substreams/target/
+substreams/Cargo.lock
+*.spkg
+
+# Generated protobuf (regenerate with `substreams build` and `buf generate`)
+substreams/src/pb/
+sink/pb/
+
+# Sink runtime state
+sink/cursor.txt
+
+# Editor / OS
+.DS_Store

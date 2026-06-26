@@ -1,0 +1,37 @@
+specVersion: v0.1.0
+package:
+  name: substreams_solana_wallet_tracker
+  version: v0.1.0
+  doc: |
+    Reports the Solana transactions that touch a wallet present in a Hosted
+    Store. The store is filled externally (e.g. by the companion sink's
+    `store add` command) with the wallets to watch.
+
+network: solana
+
+protobuf:
+  files:
+    - sf/substreams/example/wallettracker/v1/tracked.proto
+    - com/acme/wallet/v1/wallet.proto
+  importPaths:
+    - ../proto
+
+binaries:
+  default:
+    type: wasm/rust-v1
+    file: ./target/wasm32-unknown-unknown/release/substreams_solana_wallet_tracker.wasm
+
+modules:
+  - name: map_tracked_transactions
+    kind: map
+    # Pin to the first slot your consumer actually needs. 320_000_000 is just a
+    # recent-ish placeholder so a cold run does not backfill from genesis.
+    initialBlock: 320000000
+    inputs:
+      - source: sf.solana.type.v1.Block
+      # The Hosted Store, referenced by its deployment ID. The `@<version>`
+      # suffix is required for manifest validation but ignored at resolution —
+      # the store is resolved by deployment ID alone. Replace <deployment-id>.
+      - foundational-store: 97caa575-4434-4877-b672-92f73c914656@v0.1.0
+    output:
+      type: proto:sf.substreams.example.wallettracker.v1.TrackedTransactions

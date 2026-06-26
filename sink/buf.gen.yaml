@@ -1,0 +1,13 @@
+# Generates the Go bindings for tracked.proto into ./pb.
+#
+# The Hosted Store proto types (feed/service/model) are NOT generated here — the
+# sink imports the canonical Go bindings from the
+# github.com/streamingfast/substreams-foundational-store module instead.
+#
+# Run from the sink/ directory:
+#   buf generate ../proto
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: pb
+    opt: paths=source_relative

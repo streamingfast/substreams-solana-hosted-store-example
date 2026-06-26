@@ -1,0 +1,13 @@
+# Used by `substreams protogen` / `substreams build` to generate the Rust
+# bindings for our own proto (tracked.proto). The Hosted Store model types
+# (sf.substreams.foundational_store.model.v2.*) are bundled inside the
+# `substreams` crate, so they do not need to be generated here.
+version: v2
+modules:
+  - path: ../proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

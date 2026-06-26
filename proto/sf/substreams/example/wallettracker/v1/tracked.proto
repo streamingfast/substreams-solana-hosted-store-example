@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package sf.substreams.example.wallettracker.v1;
+
+option go_package = "github.com/streamingfast/solana-wallet-tracker-example/pb/sf/substreams/example/wallettracker/v1;pbtracked";
+
+// The Hosted Store value type is com.acme.wallet.v1.WalletInfo (the customer's
+// type, defined in com/acme/wallet/v1/wallet.proto). The store key is the UTF-8
+// bytes of the base58-encoded wallet address — both the Substreams (Rust) reader
+// and the sink `store add` command use that convention so keys line up.
+
+// TrackedTransactions is the per-block output of the `map_tracked_transactions`
+// module: the subset of transactions in a block that touch at least one wallet
+// present in the Hosted Store.
+message TrackedTransactions {
+  // Solana slot (block number) these transactions belong to.
+  uint64 slot = 1;
+
+  // Transactions of interest. Empty when no tracked wallet was touched.
+  repeated TrackedTransaction transactions = 2;
+}
+
+// TrackedTransaction is a single transaction that touched one or more tracked
+// wallets.
+message TrackedTransaction {
+  // Base58 transaction signature (the transaction id).
+  string signature = 1;
+
+  // Every tracked wallet that this transaction touched, with its store label.
+  repeated TrackedMatch matches = 2;
+}
+
+// TrackedMatch ties a matched wallet address to the label stored for it.
+message TrackedMatch {
+  // Base58 wallet address that matched an entry in the Hosted Store.
+  string address = 1;
+
+  // Label read from the Hosted Store value (WalletInfo.label).
+  string label = 2;
+}
