@@ -3,10 +3,12 @@ module github.com/streamingfast/solana-wallet-tracker-example
 go 1.24.2
 
 require (
+	github.com/mr-tron/base58 v1.3.0
 	github.com/spf13/cobra v1.8.1
+	github.com/streamingfast/dgrpc v0.0.0-20251218133127-15b36e02a74f
 	github.com/streamingfast/logging v0.0.0-20230608130331-f22c91403091
 	github.com/streamingfast/substreams v1.16.7-0.20251015182509-1c9938899a91
-	github.com/streamingfast/substreams-foundational-store v0.1.1-0.20250930145106-2f2a893cbf56
+	github.com/streamingfast/substreams-foundational-store v0.2.1-0.20260623111146-8d9813ea88ff
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.77.0
 	google.golang.org/protobuf v1.36.10
@@ -100,7 +102,6 @@ require (
 	github.com/streamingfast/cli v0.0.4-0.20250815192146-d8a233ec3d0b // indirect
 	github.com/streamingfast/dbin v0.9.1-0.20231117225723-59790c798e2c // indirect
 	github.com/streamingfast/derr v0.0.0-20250814163534-bd7407bd89d7 // indirect
-	github.com/streamingfast/dgrpc v0.0.0-20251218133127-15b36e02a74f // indirect
 	github.com/streamingfast/dmetrics v0.0.0-20250711072030-f023e918a175 // indirect
 	github.com/streamingfast/dstore v0.1.1-0.20250609173504-95368d3441ee // indirect
 	github.com/streamingfast/firehose-networks v0.2.0 // indirect
@@ -141,8 +142,3 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-// While this example lives inside the substreams-foundational-store repo, resolve
-// the Hosted Store proto bindings locally. Drop this once the example moves to
-// its own repo and the foundational-store module is published/tagged.
-replace github.com/streamingfast/substreams-foundational-store => ../../

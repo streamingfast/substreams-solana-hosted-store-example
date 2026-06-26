@@ -2,18 +2,19 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/mr-tron/base58"
 	"github.com/spf13/cobra"
+	"github.com/streamingfast/dgrpc"
+	"github.com/streamingfast/substreams/client"
 	pbfeed "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/feed/v2"
 	pbmodel "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/model/v2"
 	pbservice "github.com/streamingfast/substreams-foundational-store/pb/sf/substreams/foundational-store/service/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	pbwallet "github.com/streamingfast/solana-wallet-tracker-example/pb/com/acme/wallet/v1"
@@ -22,9 +23,11 @@ import (
 // storeCmd groups the Hosted Store admin sub-commands. These showcase exactly
 // the client code a customer needs to populate and inspect the store.
 //
-// KEY ENCODING: the store key is the UTF-8 bytes of the base58 wallet address
-// (the string you pass on the command line). The Substreams reader uses the same
-// convention, so keys written here line up with the lookups done per block.
+// KEY ENCODING: the address you pass on the command line is a base58 Solana
+// address, but the store key is the RAW 32-byte pubkey it decodes to — NOT the
+// base58 string. decodeAddress below does that conversion (and validates the
+// input), and the Substreams reader keys on the same raw bytes, so entries
+// written here line up with the lookups done per block.
 var storeCmd = &cobra.Command{
 	Use:   "store",
 	Short: "Interact with the Hosted Store (add / get / remove wallets)",
@@ -63,7 +66,8 @@ ready once you have finished populating it.`,
 
 func init() {
 	storeCmd.PersistentFlags().String("endpoint", "", "Hosted Store gRPC endpoint, e.g. <deployment-id>.hs.streamingfast.io:443 (required)")
-	storeCmd.PersistentFlags().String("token-envvar", "SUBSTREAMS_API_TOKEN", "Env var holding the StreamingFast JWT used as the Bearer token")
+	storeCmd.PersistentFlags().String("api-key-envvar", "SUBSTREAMS_API_KEY", "Env var holding a StreamingFast API key (sent as the x-api-key header); preferred, takes precedence over --token-envvar")
+	storeCmd.PersistentFlags().String("token-envvar", "SUBSTREAMS_API_TOKEN", "Env var holding a StreamingFast JWT (sent as the Bearer token); used only when the API key env var is empty")
 	storeCmd.PersistentFlags().Bool("plaintext", false, "Use a plaintext (non-TLS) connection — for a local dev stack only")
 
 	storeGetCmd.Flags().Uint64("block-number", 0, "Block number to query at; must be <= the store's processed height or it returns block_reached=false")
@@ -77,6 +81,11 @@ func init() {
 
 func storeAddE(cmd *cobra.Command, args []string) error {
 	address, label := args[0], args[1]
+
+	key, err := decodeAddress(address)
+	if err != nil {
+		return err
+	}
 
 	conn, err := dialStore(cmd)
 	if err != nil {
@@ -100,7 +109,7 @@ func storeAddE(cmd *cobra.Command, args []string) error {
 		Entries: &pbmodel.SinkEntries{
 			Entries: []*pbmodel.Entry{
 				{
-					Key:   &pbmodel.Key{Bytes: []byte(address)},
+					Key:   &pbmodel.Key{Bytes: key},
 					Value: value,
 				},
 			},
@@ -118,6 +127,11 @@ func storeGetE(cmd *cobra.Command, args []string) error {
 	address := args[0]
 	blockNumber, _ := cmd.Flags().GetUint64("block-number")
 
+	key, err := decodeAddress(address)
+	if err != nil {
+		return err
+	}
+
 	conn, err := dialStore(cmd)
 	if err != nil {
 		return err
@@ -130,7 +144,7 @@ func storeGetE(cmd *cobra.Command, args []string) error {
 	client := pbservice.NewStoreClient(conn)
 	resp, err := client.Get(ctx, &pbservice.GetRequest{
 		BlockNumber: blockNumber,
-		Keys:        []*pbmodel.Key{{Bytes: []byte(address)}},
+		Keys:        []*pbmodel.Key{{Bytes: key}},
 	})
 	if err != nil {
 		return fmt.Errorf("Store.Get: %w", err)
@@ -204,7 +218,27 @@ func storeRemoveE(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("remove not supported by the Hosted Store v2 Feed API")
 }
 
-// dialStore opens an authenticated gRPC connection to the Hosted Store.
+// decodeAddress turns a base58 Solana address (what a human pastes on the
+// command line) into the RAW 32-byte pubkey used as the store key. It rejects
+// anything that is not valid base58 or does not decode to exactly 32 bytes, so a
+// typo'd address fails loudly here instead of being stored under a bogus key
+// that the Substreams reader would never match.
+func decodeAddress(address string) ([]byte, error) {
+	raw, err := base58.Decode(address)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base58 Solana address %q: %w", address, err)
+	}
+	if len(raw) != 32 {
+		return nil, fmt.Errorf("invalid Solana address %q: decoded to %d bytes, expected 32", address, len(raw))
+	}
+	return raw, nil
+}
+
+// dialStore opens an authenticated gRPC connection to the Hosted Store, built
+// the same way the sink `run` command builds its Substreams connection: through
+// dgrpc's external-client helpers (round-robin, keepalive, OpenTelemetry, large
+// receive limit and proper TLS), with the transport credentials selected by
+// dgrpc from the --plaintext flag.
 //
 // NOTE ON CLIENT LIFETIME: each CLI sub-command dials a fresh connection and
 // closes it on return, because a command is a short, one-shot process. In a
@@ -221,27 +255,58 @@ func dialStore(cmd *cobra.Command) (*grpc.ClientConn, error) {
 	}
 	plaintext, _ := cmd.Flags().GetBool("plaintext")
 
-	opts := []grpc.DialOption{}
-	if plaintext {
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	} else {
-		tokenEnvvar, _ := cmd.Flags().GetString("token-envvar")
-		token := os.Getenv(tokenEnvvar)
-		if token == "" {
-			return nil, fmt.Errorf("no JWT found in env var %q; mint one at https://thegraph.market/api-keys", tokenEnvvar)
+	transportCreds, err := dgrpc.WithAutoTransportCredentials(false, plaintext, false)
+	if err != nil {
+		return nil, fmt.Errorf("configure transport credentials: %w", err)
+	}
+	opts := []grpc.DialOption{transportCreds}
+
+	// Auth is only attached over a secure transport; plaintext is for a local
+	// dev stack that needs no credentials.
+	if !plaintext {
+		creds, err := perRPCCredentials(cmd)
+		if err != nil {
+			return nil, err
 		}
-		opts = append(opts,
-			grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})),
-			grpc.WithPerRPCCredentials(bearerToken(token)),
-		)
+		opts = append(opts, grpc.WithPerRPCCredentials(creds))
 	}
 
-	conn, err := grpc.NewClient(endpoint, opts...)
+	conn, err := dgrpc.NewClientConn(endpoint, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("dial hosted store at %q: %w", endpoint, err)
 	}
 	return conn, nil
 }
+
+// perRPCCredentials resolves the call credential the same way the sink's `run`
+// command does: a StreamingFast API key (sent as x-api-key) is preferred, and a
+// JWT (sent as a Bearer token) is the fallback when no API key is set.
+func perRPCCredentials(cmd *cobra.Command) (credentials.PerRPCCredentials, error) {
+	apiKeyEnvvar, _ := cmd.Flags().GetString("api-key-envvar")
+	if key := os.Getenv(apiKeyEnvvar); key != "" {
+		return apiKeyCredential(key), nil
+	}
+
+	tokenEnvvar, _ := cmd.Flags().GetString("token-envvar")
+	if token := os.Getenv(tokenEnvvar); token != "" {
+		return bearerToken(token), nil
+	}
+
+	return nil, fmt.Errorf(
+		"no credential found: set %s (a StreamingFast API key, preferred) or %s (a JWT); mint one at https://thegraph.market/api-keys",
+		apiKeyEnvvar, tokenEnvvar)
+}
+
+// apiKeyCredential attaches `x-api-key: <key>` to every gRPC call. The Hosted
+// Store gateway accepts a StreamingFast API key directly, exactly like the
+// Substreams endpoint the `run` command talks to.
+type apiKeyCredential string
+
+func (k apiKeyCredential) GetRequestMetadata(_ context.Context, _ ...string) (map[string]string, error) {
+	return map[string]string{client.ApiKeyHeader: string(k)}, nil
+}
+
+func (k apiKeyCredential) RequireTransportSecurity() bool { return true }
 
 // bearerToken attaches `authorization: Bearer <jwt>` to every gRPC call.
 type bearerToken string

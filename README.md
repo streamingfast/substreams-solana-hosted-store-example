@@ -46,46 +46,74 @@ This keeps the work at **one store round-trip per block**, not one per address.
 
 ### Key encoding (important)
 
-The store key is the **UTF-8 bytes of the base58 wallet address** (not the raw
-32-byte pubkey). The Rust reader and the `store add` command both follow this,
-so keys line up. The value is a customer-owned `com.acme.wallet.v1.WalletInfo
-{ label }` wrapped in `google.protobuf.Any`, type URL
+The store key is the **raw 32-byte Solana pubkey**, not its base58 string form.
+You still pass a base58 address on the command line (that is what humans paste);
+the `store add` / `store get` commands base58-**decode** it to the 32 raw bytes
+before talking to the store, and reject anything that is not a valid 32-byte
+address. The Rust reader keys on the same raw bytes (`account.0`) and only
+base58-encodes the handful of matched addresses for its output, which keeps
+base58 work out of the per-account hot loop.
+
+The value is a customer-owned `com.acme.wallet.v1.WalletInfo { label }` wrapped
+in `google.protobuf.Any`, type URL
 `type.googleapis.com/com.acme.wallet.v1.WalletInfo`.
 
 ## Prerequisites
 
 - `substreams`, `buf`, Rust (`wasm32-unknown-unknown` target), Go 1.24+.
-- A StreamingFast API token (JWT). Mint one at
-  <https://thegraph.market/api-keys> and export it:
+- A StreamingFast API key. Mint one at <https://thegraph.market/api-keys> and
+  export it:
   ```bash
-  export SUBSTREAMS_API_TOKEN=<jwt>
+  export SUBSTREAMS_API_KEY=<api-key>
   ```
+  Both the sink `run` command and the `store` sub-commands accept it (sent as
+  the `x-api-key` header). A pre-minted JWT works too via `SUBSTREAMS_API_TOKEN`,
+  used only when `SUBSTREAMS_API_KEY` is unset.
 
 ## 1. Create the Hosted Store
 
 In [The Graph Market](https://thegraph.market/sinks/new) create a **Hosted
-Store** with Type URL
-`com.acme.wallet.v1.WalletInfo`. Note the **deployment ID**,
-then set it in `substreams/substreams.yaml` (replace `<deployment-id>`).
+Store** with Type URL `com.acme.wallet.v1.WalletInfo`. Note the **deployment
+ID**, then export it once so the snippets below are copy/paste-ready:
 
-The store's gRPC endpoint is `<deployment-id>.hs.streamingfast.io:443`.
+```bash
+export DEPLOYMENT_ID=<deployment-id>
+export STORE_ENDPOINT=$DEPLOYMENT_ID.hs.streamingfast.io:443
+```
+
+Also set the same deployment ID in `substreams/substreams.yaml` (replace the
+`<deployment-id>` placeholder on the `foundational-store:` input).
 
 ## 2. Fill the store with wallets to track
 
 ```bash
 cd sink
 go run . store add 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM treasury \
-  --endpoint <deployment-id>.hs.streamingfast.io:443
+  --endpoint $STORE_ENDPOINT
 
 # inspect it back
 go run . store get 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM \
-  --endpoint <deployment-id>.hs.streamingfast.io:443 --block-number <recent-slot>
+  --endpoint $STORE_ENDPOINT --block-number <recent-slot>
 ```
 
 > `store remove` is **not** implemented: the v2 Feed API has no Delete RPC. See
 > the note in `sink/store.go`.
 
-## 3. Build & run the Substreams
+## 3. Mark the store ready
+
+A store stays **not ready** until you say so. While not ready, `store get` and a
+Substreams module reading it get `block_reached=false` (the module waits), so
+mark it ready once you have finished populating it:
+
+```bash
+cd sink
+go run . store ready --endpoint $STORE_ENDPOINT
+
+# flip it back to not-ready (e.g. before a bulk re-load) with:
+go run . store ready --ready=false --endpoint $STORE_ENDPOINT
+```
+
+## 4. Build & run the Substreams
 
 ```bash
 cd substreams
@@ -93,7 +121,7 @@ substreams build
 substreams gui ./substreams.yaml map_tracked_transactions -s 320000000 -t +100
 ```
 
-## 4. Run the sink
+## 5. Run the sink
 
 ```bash
 cd sink
@@ -111,3 +139,7 @@ go run . run -s 320000000 -t +100
 - Building/running a manifest with a `foundational-store:` input needs a
   `substreams` CLI that supports it (newer than v1.14.x). Build one from the
   `substreams` repo `develop` branch if your installed CLI rejects the field.
+- The Go sink depends on the remote-feed (`Feed.Set` / `Feed.SetReady`) API of
+  `substreams-foundational-store`, which is not in a tagged release yet, so
+  `sink/go.mod` pins an unreleased pseudo-version of it rather than a `vX.Y.Z`
+  tag. Bump it to the release once that API ships.
