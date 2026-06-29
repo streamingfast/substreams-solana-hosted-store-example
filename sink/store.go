@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mr-tron/base58"
@@ -116,7 +117,7 @@ func storeAddE(cmd *cobra.Command, args []string) error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("Feed.Set: %w", err)
+		return storeRPCError("Feed.Set", err)
 	}
 
 	fmt.Printf("added %s -> %q\n", address, label)
@@ -147,7 +148,7 @@ func storeGetE(cmd *cobra.Command, args []string) error {
 		Keys:        []*pbmodel.Key{{Bytes: key}},
 	})
 	if err != nil {
-		return fmt.Errorf("Store.Get: %w", err)
+		return storeRPCError("Store.Get", err)
 	}
 
 	if !resp.BlockReached {
@@ -196,7 +197,7 @@ func storeReadyE(cmd *cobra.Command, _ []string) error {
 
 	client := pbfeed.NewFeedClient(conn)
 	if _, err := client.SetReady(ctx, &pbfeed.SetReadyRequest{Ready: ready}); err != nil {
-		return fmt.Errorf("Feed.SetReady: %w", err)
+		return storeRPCError("Feed.SetReady", err)
 	}
 
 	fmt.Printf("store ready=%t\n", ready)
@@ -234,6 +235,22 @@ func decodeAddress(address string) ([]byte, error) {
 	return raw, nil
 }
 
+// storeRPCError wraps an error returned by a Hosted Store RPC, turning the
+// opaque gateway error you get while the store endpoint is still booting into an
+// actionable message. Right after a store is created its endpoint is not up yet
+// and the gateway (Envoy) replies with "fault filter abort" (curl shows it as
+// the response body; gRPC surfaces it inside the status message). This usually
+// clears 5–10 minutes after creation.
+func storeRPCError(rpc string, err error) error {
+	if strings.Contains(strings.ToLower(err.Error()), "fault filter abort") {
+		return fmt.Errorf(
+			"%s: the Hosted Store endpoint is not ready yet — it usually takes 5 to 10 minutes "+
+				"after the store is created before the endpoint is up. Wait a bit and retry. (underlying error: %w)",
+			rpc, err)
+	}
+	return fmt.Errorf("%s: %w", rpc, err)
+}
+
 // dialStore opens an authenticated gRPC connection to the Hosted Store, built
 // the same way the sink `run` command builds its Substreams connection: through
 // dgrpc's external-client helpers (round-robin, keepalive, OpenTelemetry, large
@@ -261,15 +278,16 @@ func dialStore(cmd *cobra.Command) (*grpc.ClientConn, error) {
 	}
 	opts := []grpc.DialOption{transportCreds}
 
-	// Auth is only attached over a secure transport; plaintext is for a local
-	// dev stack that needs no credentials.
-	if !plaintext {
-		creds, err := perRPCCredentials(cmd)
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, grpc.WithPerRPCCredentials(creds))
+	// Attach the call credential regardless of transport. Over plaintext the
+	// per-RPC credential's RequireTransportSecurity() must return false or gRPC
+	// refuses to send it; see apiKeyCredential/bearerToken below. Sending a key
+	// over plaintext exposes it on the wire — only do this against a local dev
+	// stack you trust.
+	creds, err := perRPCCredentials(cmd)
+	if err != nil {
+		return nil, err
 	}
+	opts = append(opts, grpc.WithPerRPCCredentials(creds))
 
 	conn, err := dgrpc.NewClientConn(endpoint, opts...)
 	if err != nil {
@@ -306,7 +324,11 @@ func (k apiKeyCredential) GetRequestMetadata(_ context.Context, _ ...string) (ma
 	return map[string]string{client.ApiKeyHeader: string(k)}, nil
 }
 
-func (k apiKeyCredential) RequireTransportSecurity() bool { return true }
+// RequireTransportSecurity returns false so the key can also be sent over a
+// plaintext (--plaintext) connection to a local dev stack. Over a real endpoint
+// the transport is TLS anyway; returning false only removes gRPC's refusal to
+// send the credential when there is no transport security.
+func (k apiKeyCredential) RequireTransportSecurity() bool { return false }
 
 // bearerToken attaches `authorization: Bearer <jwt>` to every gRPC call.
 type bearerToken string
@@ -315,4 +337,4 @@ func (t bearerToken) GetRequestMetadata(_ context.Context, _ ...string) (map[str
 	return map[string]string{"authorization": "Bearer " + string(t)}, nil
 }
 
-func (t bearerToken) RequireTransportSecurity() bool { return true }
+func (t bearerToken) RequireTransportSecurity() bool { return false }

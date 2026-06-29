@@ -61,6 +61,13 @@ in `google.protobuf.Any`, type URL
 ## Prerequisites
 
 - `substreams`, `buf`, Rust (`wasm32-unknown-unknown` target), Go 1.24+.
+- `buf` is required to generate the Go protobuf bindings the sink imports.
+  Install it with one of:
+  ```bash
+  brew install bufbuild/buf/buf          # macOS
+  go install github.com/bufbuild/buf/cmd/buf@latest   # any platform with Go
+  ```
+  See <https://buf.build/docs/installation> for other methods.
 - A StreamingFast API key. Mint one at <https://thegraph.market/api-keys> and
   export it:
   ```bash
@@ -84,26 +91,41 @@ export STORE_ENDPOINT=$DEPLOYMENT_ID.hs.streamingfast.io:443
 Also set the same deployment ID in `substreams/substreams.yaml` (replace the
 `<deployment-id>` placeholder on the `foundational-store:` input).
 
-## 2. Fill the store with wallets to track
+> **Wait for the endpoint to come up.** A freshly created store's endpoint is
+> not reachable immediately — it usually takes **5 to 10 minutes**. Until then
+> any call (or a plain `curl https://$DEPLOYMENT_ID.hs.streamingfast.io`) fails
+> with a confusing gateway error like `fault filter abort`. The `store` commands
+> below detect that and tell you to wait; just retry after a few minutes.
+
+## 2. Build the sink CLI
+
+The sink imports Go bindings generated from `proto/tracked.proto`. Generate them
+**before** the first `go run .`, otherwise the build fails looking for the
+missing `pb/` packages:
+
+```bash
+cd sink
+buf generate ../proto      # generates ./pb (one time, re-run if the proto changes)
+go mod tidy
+```
+
+## 3. Fill the store with wallets to track
 
 ```bash
 cd sink
 go run . store add 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM treasury \
   --endpoint $STORE_ENDPOINT
-
-# inspect it back
-go run . store get 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM \
-  --endpoint $STORE_ENDPOINT --block-number <recent-slot>
 ```
 
 > `store remove` is **not** implemented: the v2 Feed API has no Delete RPC. See
 > the note in `sink/store.go`.
 
-## 3. Mark the store ready
+## 4. Mark the store ready
 
 A store stays **not ready** until you say so. While not ready, `store get` and a
-Substreams module reading it get `block_reached=false` (the module waits), so
-mark it ready once you have finished populating it:
+Substreams module reading it get `block_reached=false` (the module waits) — so
+you cannot read back what you just `set` until the store is marked ready. Mark it
+ready once you have finished populating it:
 
 ```bash
 cd sink
@@ -115,7 +137,18 @@ go run . store ready --endpoint $STORE_ENDPOINT
 go run . store ready --ready=false --endpoint $STORE_ENDPOINT
 ```
 
-## 4. Build & run the Substreams
+## 5. Read back an entry
+
+Now that the store is ready, `store get` returns the entry you added (before
+marking it ready this would report `block_reached=false`):
+
+```bash
+cd sink
+go run . store get 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM \
+  --endpoint $STORE_ENDPOINT --block-number <recent-slot>
+```
+
+## 6. Build & run the Substreams
 
 ```bash
 cd substreams
@@ -123,12 +156,12 @@ substreams build
 substreams gui ./substreams.yaml map_tracked_transactions -s 320000000 -t +100
 ```
 
-## 5. Run the sink
+## 7. Run the sink
+
+The Go bindings were already generated in step 2, so just run it:
 
 ```bash
 cd sink
-buf generate ../proto      # generate Go bindings for tracked.proto (one time)
-go mod tidy
 go run . run -s 320000000 -t +100
 # cursor is written to ./cursor.txt after each block; re-run to resume
 ```
