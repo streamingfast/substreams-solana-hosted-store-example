@@ -80,8 +80,17 @@ in `google.protobuf.Any`, type URL
 ## 1. Create the Hosted Store
 
 In [The Graph Market](https://thegraph.market/sinks/new) create a **Hosted
-Store** with Type URL `com.acme.wallet.v1.WalletInfo`. Note the **deployment
-ID**, then export it once so the snippets below are copy/paste-ready:
+Store**.
+
+> ⚠️ **Set the Type URL field to exactly:**
+> ```
+> com.acme.wallet.v1.WalletInfo
+> ```
+> This step is easy to miss — the store will not work if the Type URL does not
+> match the value embedded in `proto/tracked.proto`.
+
+Note the **deployment ID**, then export it once so the snippets below are
+copy/paste-ready:
 
 ```bash
 export DEPLOYMENT_ID=<deployment-id>
@@ -111,8 +120,9 @@ go mod tidy
 
 ## 3. Fill the store with wallets to track
 
+Still in `sink/` from step 2:
+
 ```bash
-cd sink
 go run . store add 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM treasury \
   --endpoint $STORE_ENDPOINT
 ```
@@ -128,9 +138,6 @@ you cannot read back what you just `set` until the store is marked ready. Mark i
 ready once you have finished populating it:
 
 ```bash
-cd sink
-
-buf generate ../proto
 go run . store ready --endpoint $STORE_ENDPOINT
 
 # flip it back to not-ready (e.g. before a bulk re-load) with:
@@ -143,25 +150,34 @@ Now that the store is ready, `store get` returns the entry you added (before
 marking it ready this would report `block_reached=false`):
 
 ```bash
-cd sink
 go run . store get 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM \
-  --endpoint $STORE_ENDPOINT --block-number <recent-slot>
+  --endpoint $STORE_ENDPOINT
 ```
+
+This store is **user-driven** — entries come from `Feed.Set`, not from a
+block-by-block scan — so it is not aligned on Solana slots and you do **not**
+need to pass a block number. Readiness alone gates reads: once marked ready
+(step 4), a plain `get` returns the entry.
 
 ## 6. Build & run the Substreams
 
 ```bash
-cd substreams
+cd ../substreams
 substreams build
 substreams gui ./substreams.yaml map_tracked_transactions -s 320000000 -t +100
 ```
+
+> **No data in the GUI?** A freshly created store needs internal network routes
+> to propagate before the Substreams can reach it — this can take **a few
+> minutes** beyond the initial endpoint warm-up. If the GUI shows no output,
+> wait a few minutes and re-run.
 
 ## 7. Run the sink
 
 The Go bindings were already generated in step 2, so just run it:
 
 ```bash
-cd sink
+cd ../sink
 go run . run -s 320000000 -t +100
 # cursor is written to ./cursor.txt after each block; re-run to resume
 ```
