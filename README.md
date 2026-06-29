@@ -107,6 +107,8 @@ mark it ready once you have finished populating it:
 
 ```bash
 cd sink
+
+buf generate ../proto
 go run . store ready --endpoint $STORE_ENDPOINT
 
 # flip it back to not-ready (e.g. before a bulk re-load) with:
